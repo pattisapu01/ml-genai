@@ -107,14 +107,16 @@ def get_single_embedding(text):
 df_test = df.loc[X_test.index]
 print("Number of rows in df_test:", len(df_test))
 
-embeddings_file = 'embeddings.npy'
+embeddings_file = 'embeddings_test.npy'
 
 
 # Check if embeddings file exists
 if os.path.exists(embeddings_file):
+    print("Embeddings file FOUND!")
     # Load embeddings from file
     embeddings_array = np.load(embeddings_file)
 else:
+    print("Embeddings file NOT FOUND!")
     # Convert numerical fields to strings and concatenate them for embeddings
     df_test['combined'] = df_test['type'] + " " + df_test['amount'].astype(str) + " " + \
                       df_test['oldbalanceOrg'].astype(str) + " " + df_test['newbalanceOrg'].astype(str) + " " + \
@@ -271,13 +273,6 @@ unique_to_euclidean = euclidean_anomalies - rf_anomalies - embedding_anomalies
 
 # Generate a summary report
 summary = {
-    "Embedding Approach": {
-        "Accuracy": embedding_accuracy,
-        "Precision": embedding_precision,
-        "Recall": embedding_recall,
-        "F1 Score": embedding_f1,
-        "Unique Anomalies": len(unique_to_embeddings)
-    },
     "Random Forest Approach": {
         "Accuracy": rf_accuracy,
         "Precision": rf_precision,
@@ -285,7 +280,14 @@ summary = {
         "F1 Score": rf_f1,
         "Unique Anomalies": len(unique_to_rf)
     },
-    "Euclidean Approach": {
+    "Embedding-Cosine Approach": {
+        "Accuracy": embedding_accuracy,
+        "Precision": embedding_precision,
+        "Recall": embedding_recall,
+        "F1 Score": embedding_f1,
+        "Unique Anomalies": len(unique_to_embeddings)
+    },
+    "Embedding-Euclidean Approach": {
         "Accuracy": euclidean_accuracy,
         "Precision": euclidean_precision,
         "Recall": euclidean_recall,
@@ -304,6 +306,7 @@ for approach, metrics in summary.items():
     else:
         print(f"  {metrics}")
     print()
+
 
 # Load the dataset
 df_output = pd.read_csv('transactions_with_anomalies.csv')
@@ -344,9 +347,90 @@ match_count_euclidean = (df_test['isFraud'] == df_output['embedding_euclidean_is
 total_fraud_count = df_test['isFraud'].sum()
 print("Total count of isFraud = true rows [ground truth]:", total_fraud_count)
 print("\nMatch Counts with isFraud:")
-print("Random Forest:", match_count_rf)
-print("Embedding-Cosine:", match_count_embedding)
-print("Embedding-Euclidean:", match_count_euclidean)
+print("Random Forest Approach:", match_count_rf)
+print("Embedding-Cosine Approach:", match_count_embedding)
+print("Embedding-Euclidean Approach:", match_count_euclidean)
+
+#neural net section
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.utils import to_categorical
+import numpy as np
+
+# Load the dataset
+df = pd.read_csv("simulated_transactions.csv")
+
+# Preprocessing
+# One-hot encoding for categorical features
+encoder = OneHotEncoder(sparse=False)
+type_encoded = encoder.fit_transform(df[['type']])
+
+# Numerical features
+numerical_columns = ['amount', 'oldbalanceOrg', 'newbalanceOrg', 'oldbalanceDest', 'newbalanceDest']
+numerical_features = df[numerical_columns].copy()
+
+# Scale the numerical features
+scaler = StandardScaler()
+numerical_features_scaled = scaler.fit_transform(numerical_features)
+
+# Combine numerical and categorical features
+X = np.hstack((numerical_features_scaled, type_encoded))
+
+# Target variable
+y = df['isFraud'].values
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.5, random_state=42)
+
+# Convert target variable to categorical (one-hot encoding)
+y_train_categorical = to_categorical(y_train)
+y_test_categorical = to_categorical(y_test)
+
+# Neural Network Model
+model = Sequential()
+model.add(Dense(64, input_dim=X_train.shape[1], activation='relu'))
+model.add(Dense(32, activation='relu'))
+model.add(Dense(2, activation='softmax'))  # 2 output neurons for binary classification
+
+# Compile the model
+model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+
+# Summary of the model
+model.summary()
+
+# Training the model
+epochs = 50  # Number of epochs for training
+batch_size = 32  # Batch size for training
+
+history = model.fit(X_train, y_train_categorical, epochs=epochs, batch_size=batch_size, validation_split=0.2)
+
+# Evaluating the model
+loss, accuracy = model.evaluate(X_test, y_test_categorical)
+print(f"Neural Network Model Accuracy: {accuracy}")
+
+# Predictions
+y_pred_probabilities = model.predict(X_test)
+y_pred = np.argmax(y_pred_probabilities, axis=1)
+
+# Calculating metrics
+from sklearn.metrics import precision_score, recall_score, f1_score
+
+nn_precision = precision_score(y_test, y_pred)
+nn_recall = recall_score(y_test, y_pred)
+nn_f1 = f1_score(y_test, y_pred)
+
+print(f"Neural Network Precision: {nn_precision}")
+print(f"Neural Network Recall: {nn_recall}")
+print(f"Neural Network F1 Score: {nn_f1}")
+
+# Counting matched anomalies
+nn_matched_anomalies = np.sum((y_pred == 1) & (y_test == 1))
+print(f"Neural Network Matched Anomalies with Ground Truth: {nn_matched_anomalies} out of {total_fraud_count}")
+
 
 now = datetime.datetime.now()
 print("Current date and time after full run: ")
